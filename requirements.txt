@@ -1,0 +1,8 @@
+datasets
+transformers
+openai
+huggingface-hub
+peft
+bitsandbytes
+wandb
+trl
