@@ -9,7 +9,7 @@ from trl import SFTTrainer
 from datetime import datetime
 
 dataset = datasets.load_dataset("scott-persona/emotion_test_set",split="train")
-train_test_split = dataset.train_test_split(test_size=0.05)
+train_test_split = dataset.train_test_split(test_size=0.05,seed=42)
 train_set = train_test_split["train"]
 test_set = train_test_split["test"]
 
@@ -42,8 +42,8 @@ def create_peft_config(model):
     peft_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         inference_mode=False,
-        r=8,
-        lora_alpha=32,
+        r=16,
+        lora_alpha=64,
         lora_dropout=0.05,
         target_modules =["q_proj","k_proj","v_proj","o_proj"],
         modules_to_save=["embed_tokens"], #set embed_tokens as trainable too
@@ -61,8 +61,8 @@ train_set = train_set.map(template_dataset, remove_columns=list(train_set.featur
 
 config = {
     'lora_config': lora_config,
-    'learning_rate': 1e-5,
-    'num_train_epochs': 1,
+    'learning_rate': 2e-5,
+    'num_train_epochs': 3,
     'gradient_accumulation_steps': 2,
     'per_device_train_batch_size': 2,
 }
@@ -93,7 +93,8 @@ training_params = TrainingArguments(
     max_steps=1,
     warmup_ratio=0.03,
     group_by_length=True,
-    lr_scheduler_type="constant",
+    lr_scheduler_type="cosine",
+    lr_scheduler_kwargs={"min_lr": 1e-6},
     report_to="wandb",
     run_name=run_name
 )
