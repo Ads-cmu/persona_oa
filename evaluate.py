@@ -7,7 +7,7 @@ import torch
 dataset = datasets.load_dataset("scott-persona/emotion_test_set",split="train")
 
 # Load the fine-tuned model and tokenizer
-model_path = "../finetuned"
+model_path = "../finetuned_2"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
 model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1",torch_dtype=torch.float16, load_in_4bit=True)
@@ -18,39 +18,41 @@ inference_model = PeftModel.from_pretrained(model, model_path)
 
 def format_data(sample):
     instruction = "Classify the paragraph into one emotion."
-    context = f"Paragraph: {sample['situation']}. Emotion: "
+    context = f"Paragraph: {sample['situation']}.\n Emotion: "
     # join all the parts together
     prompt = "".join([instruction, context])
     return prompt
 
 # template dataset to add prompt to each sample
 def template_dataset(sample):
-    sample["text"] = f"{format_data(sample)}{tokenizer.eos_token}"
+    sample["text"] = f"{format_data(sample)}"
     return sample
 
-dataset = dataset.map(template_dataset, remove_columns=list(dataset.features))
+dataset = dataset.map(template_dataset)
 train_test_split = dataset.train_test_split(test_size=0.05,seed=42)
 train_set = train_test_split["train"]
 test_set = train_test_split["test"]
 
 
 def generate_and_decode(prompt):
+    #print("input text: ",prompt)
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+    prompt_length = inputs['input_ids'].shape[1]
     with torch.no_grad():
         outputs = model(**inputs, labels=inputs["input_ids"])
     logits = outputs.logits
     # Get the first generated token ID
-    predicted_token_id = logits[:, 0, :].argmax(dim=-1)
+    predicted_token_id = logits[:, prompt_length-2, :].argmax(dim=-1)
     # Decode the token ID to text
     predicted_label = tokenizer.decode(predicted_token_id).strip()
-    print(tokenizer.decode(logits.argmax(dim=-1)[0]))
+    #print("model output: ",tokenizer.decode(logits.argmax(dim=-1)[0]))
+    #print("predicted label: ",predicted_label)
     return predicted_label
 
 
 total = 0
 for row in iter(train_set):
     pred_emotion = generate_and_decode(row['text'])
-    print(row['emotion'],pred_emotion)
     total+=(row['emotion']==pred_emotion)
 
 accuracy = total / len(train_set)
@@ -59,7 +61,6 @@ print(f"Training accuracy: {accuracy * 100:.2f}%")
 total = 0
 for row in iter(test_set):
     pred_emotion = generate_and_decode(row['text'])
-    print(row['emotion'],pred_emotion)
     total+=(row['emotion']==pred_emotion)
 
 accuracy = total / len(test_set)

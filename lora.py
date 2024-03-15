@@ -27,7 +27,7 @@ model.resize_token_embeddings(len(tokenizer))
 
 def format_data(sample):
     instruction = "Classify the paragraph into one emotion."
-    context = f"Paragraph: {sample['situation']}. Emotion: {sample['emotion']}"
+    context = f"Paragraph: {sample['situation']}.\n Emotion: {sample['emotion']}"
     # join all the parts together
     prompt = "".join([instruction, context])
     return prompt
@@ -83,18 +83,17 @@ training_params = TrainingArguments(
     per_device_train_batch_size=config['per_device_train_batch_size'],
     gradient_accumulation_steps=config['gradient_accumulation_steps'],
     optim="paged_adamw_32bit",
-    save_steps=25,
+    save_steps=200,
     logging_steps=25,
     learning_rate=config['learning_rate'],
     weight_decay=0.001,
     fp16=False,
     bf16=False,
     max_grad_norm=0.3,
-    max_steps=1,
+    max_steps=-1,
     warmup_ratio=0.03,
     group_by_length=True,
     lr_scheduler_type="cosine",
-    lr_scheduler_kwargs={"min_lr": 1e-6},
     report_to="wandb",
     run_name=run_name
 )
@@ -116,6 +115,6 @@ with profiler:
     train_loss = trainer_stats.training_loss
     print(f"Training loss:{train_loss}")
 
-    trainer.model.save_pretrained("../finetuned")
-    tokenizer.save_pretrained("../finetuned")
+    trainer.model.save_pretrained("../finetuned_2")
+    tokenizer.save_pretrained("../finetuned_2")
     
