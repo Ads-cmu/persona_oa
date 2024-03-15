@@ -1,5 +1,4 @@
 import datasets
-import openai
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
 import torch
