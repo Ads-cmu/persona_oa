@@ -10,5 +10,14 @@ To evaluate the model, follow these steps
 6. Change the dataset to be loaded (line 9 of `evaluate.py`) if needed
 7. Run `python evaluate.py`
 
+# Model Details
+The final model used is the following:
+1. Base model: Mistral-7B
+2. 27 additional tokens were added to represent the 27 emotions. This had to be done as each emotion was 3-6 tokens in the base tokenizer. 
+3. QLoRA finetuning was done to finetune the model. 
+4. Some training details: Quantization: 4 bit, r=16, alpha = 64, epochs = 3, optimizer = paged AdamW, LR scheduler = cosine with warmup
+
+# Alternate Approach
+I believe LLMs are overparameterized for this emotion classification task. An alternate approach here could be to finetune a DistillBert model (67M parameters). To try this out, run `python alternate_approach.py`. 
 
 
