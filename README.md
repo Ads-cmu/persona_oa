@@ -29,6 +29,12 @@ The final model used is the following:
 # Alternate Approach
 I believe LLMs are overparameterized for this emotion classification task. An alternate approach here could be to finetune a DistillBert model (67M parameters). To try this out, run `python alternate_approach.py`.
 
+| Characteristics    | Mistral    | Bert Finetune | Difference    |
+|---------------------|------------|---------------|---------------|
+| Parameters          | 7B         | 67M           | 100x smaller  |
+| Train Time          | ~2 hours   | ~15 min       | 8x faster     |
+| Inference Latency   | 0.54s      | 0.004s        | 135x faster   |
+| Accuracy (Val)      | 95.18%     | 93.17%        | 0.8% worse    |
 
 
 
