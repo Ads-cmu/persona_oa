@@ -17,7 +17,18 @@ The final model used is the following:
 3. QLoRA finetuning was done to finetune the model. 
 4. Some training details: Quantization: 4 bit, r=16, alpha = 64, epochs = 3, optimizer = paged AdamW, LR scheduler = cosine with warmup
 
+# Results
+| Metric                | Accuracy     |
+|-----------------------|--------------|
+| Train Accuracy        | 97.36%       |
+| Val Accuracy          | 95.18%       |
+| Train Accuracy (Exact Match) | 82.47% |
+| Val Accuracy (Exact Match)   | 68%    |
+
+
 # Alternate Approach
-I believe LLMs are overparameterized for this emotion classification task. An alternate approach here could be to finetune a DistillBert model (67M parameters). To try this out, run `python alternate_approach.py`. 
+I believe LLMs are overparameterized for this emotion classification task. An alternate approach here could be to finetune a DistillBert model (67M parameters). To try this out, run `python alternate_approach.py`.
+
+
 
 
