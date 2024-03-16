@@ -15,7 +15,7 @@ test_set = train_test_split["test"]
 
 model_name_or_path = "mistralai/Mistral-7B-v0.1"
 tokenizer_name_or_path = "mistralai/Mistral-7B-v0.1"
-tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
 model = AutoModelForCausalLM.from_pretrained(model_name_or_path,torch_dtype=torch.float16, load_in_4bit=True)
 
 emotions = set()
@@ -62,7 +62,7 @@ train_set = train_set.map(template_dataset, remove_columns=list(train_set.featur
 config = {
     'lora_config': lora_config,
     'learning_rate': 2e-5,
-    'num_train_epochs': 3,
+    'num_train_epochs': 4,
     'gradient_accumulation_steps': 2,
     'per_device_train_batch_size': 2,
 }
@@ -115,6 +115,6 @@ with profiler:
     train_loss = trainer_stats.training_loss
     print(f"Training loss:{train_loss}")
 
-    trainer.model.save_pretrained("../finetuned_2")
-    tokenizer.save_pretrained("../finetuned_2")
+    trainer.model.save_pretrained("../finetuned_3")
+    tokenizer.save_pretrained("../finetuned_3")
     

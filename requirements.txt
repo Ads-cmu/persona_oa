@@ -7,3 +7,4 @@ bitsandbytes
 wandb
 trl
 numpy
+scikit-learn

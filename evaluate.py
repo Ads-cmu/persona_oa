@@ -1,13 +1,15 @@
-# from openai import OpenAI
+from openai import OpenAI
 import datasets
-from transformers import pipeline,AutoModelForCausalLM, AutoTokenizer, AutoConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel, LoraConfig
 import torch
+import time 
+import numpy as np
 
 dataset = datasets.load_dataset("scott-persona/emotion_test_set",split="train")
 
 # Load the fine-tuned model and tokenizer
-model_path = "../finetuned_2"
+model_path = "Advaith28/persona_oa_3epoch"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
 model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1",torch_dtype=torch.float16, load_in_4bit=True)
@@ -28,12 +30,6 @@ def template_dataset(sample):
     sample["text"] = f"{format_data(sample)}"
     return sample
 
-dataset = dataset.map(template_dataset)
-train_test_split = dataset.train_test_split(test_size=0.05,seed=42)
-train_set = train_test_split["train"]
-test_set = train_test_split["test"]
-
-
 def generate_and_decode(prompt):
     #print("input text: ",prompt)
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
@@ -49,61 +45,84 @@ def generate_and_decode(prompt):
     #print("predicted label: ",predicted_label)
     return predicted_label
 
+dataset = dataset.map(template_dataset)
+print("Performing model inference...")
+dataset = dataset.map(lambda x: {"predicted_emotion": generate_and_decode(x['text']),"true_emotion":x['emotion']})
+print("Model inference done.")
+train_test_split = dataset.train_test_split(test_size=0.05,seed=42)
+train_set = train_test_split["train"]
+test_set = train_test_split["test"]
 
+
+client = OpenAI()
+
+def get_embeddings(text):
+    response = client.embeddings.create(
+    input=text,
+    model="text-embedding-ada-002"
+    )
+    embedding = response.data[0].embedding
+    return embedding
+
+emotions = set()
+for _, example in enumerate(dataset):
+  emotions.add(example['emotion'])
+
+print("Generating embeddings...")
+emotion_map = dict()
+for emotion in emotions:
+    emotion_map[emotion] = get_embeddings(emotion) #caching values
+print("Embeddings generated")
+
+def cosine_angle(vector1, vector2):
+    dot_product = np.dot(vector1, vector2)
+    magnitude1 = np.linalg.norm(vector1)
+    magnitude2 = np.linalg.norm(vector2)
+    cosine_similarity = dot_product / (magnitude1 * magnitude2)
+    return cosine_similarity
+
+print("Calculating accuracy...")
+# Calculate the accuracy
 total = 0
-for row in iter(train_set):
-    pred_emotion = generate_and_decode(row['text'])
-    total+=(row['emotion']==pred_emotion)
+for i,row in enumerate(train_set):
+    pred_emotion = row['predicted_emotion']
+    if pred_emotion in emotion_map:
+        embedding2 = emotion_map[pred_emotion]
+    else:
+        embedding2 = get_embeddings(pred_emotion)
+    similarity = cosine_angle(emotion_map[row['emotion']],embedding2)
+    total+=similarity
 
 accuracy = total / len(train_set)
 print(f"Training accuracy: {accuracy * 100:.2f}%")
 
 total = 0
-for row in iter(test_set):
-    pred_emotion = generate_and_decode(row['text'])
-    total+=(row['emotion']==pred_emotion)
+for i,row in enumerate(test_set):
+    pred_emotion = row['predicted_emotion']
+    if pred_emotion in emotion_map:
+        embedding2 = emotion_map[pred_emotion]
+    else:
+        embedding2 = get_embeddings(pred_emotion)
+    similarity = cosine_angle(emotion_map[row['emotion']],embedding2)
+    total+=similarity
 
 accuracy = total / len(test_set)
 print(f"Test accuracy: {accuracy * 100:.2f}%")
 
+print("Calculating exact match accuracy...")
+total = 0
+for row in iter(train_set):
+    total+=(row['emotion']==row['predicted_emotion'])
 
+accuracy = total / len(train_set)
+print(f"Training accuracy (exact match): {accuracy * 100:.2f}%")
 
+total = 0
+for row in iter(test_set):
+    total+=(row['emotion']==row['predicted_emotion'])
 
-# client = OpenAI()
+accuracy = total / len(test_set)
+print(f"Test accuracy (exact match): {accuracy * 100:.2f}%")
 
-# def get_embeddings(text):
-#     # Generate embeddings using the "ada-2" model
-#     response = client.embeddings.create(
-#     input="Your text string goes here",
-#     model="text-embedding-ada-002"
-#     )
-#     # Extract the embedding vector from the response
-#     embedding = response.data[0].embedding
-#     return embedding
-
-# emotions = set()
-# for _, example in enumerate(dataset):
-#   emotions.add(example['emotion'])
-
-# emotion_map = dict()
-# for emotion in emotions:
-#     emotion_map[emotion] = get_embeddings(emotion) #caching values
-    
-# Apply the prediction function to the training set
-# dataset = dataset.map(lambda x: {"predicted_emotion": generate_and_decode(x['text']),"true_emotion":x['emotion']})
-
-# # Calculate the accuracy
-# total = 0
-# for i,row in enumerate(dataset):
-#     pred_emotion = row['predicted_emotion']
-#     if pred_emotion in emotion_map:
-#         embedding2 = emotion_map[pred_emotion]
-#     else:
-#         embedding2 = get_embeddings(pred_emotion)
-#     similarity = np.dot(emotion_map[row['emotion']],embedding2)
-#     total+=similarity
-
-# accuracy = total / len(dataset)
-# print(f"Training accuracy: {accuracy * 100:.2f}%")
 
 

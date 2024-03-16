@@ -1,11 +1,13 @@
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from transformers import RobertaTokenizer, RobertaModel
 import datasets
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
+import time 
 
 def fetch_embedding(text):
   encoded_input = tokenizer(text, return_tensors='pt')
@@ -26,7 +28,7 @@ emotions = set()
 for _, example in enumerate(dataset):
   emotions.add(example[label_column])
 
-label_encoder = LabelEncoder(len(emotions))
+label_encoder = LabelEncoder()
 dataset = dataset.map(lambda examples: {"labels": label_encoder.fit_transform(examples[label_column])}, batched=True) 
   
 train_test_split = dataset.train_test_split(test_size=0.05, seed=42)
@@ -67,11 +69,13 @@ class EmotionClassifier(nn.Module):
         return self.classifier(pooled_output)
 
 # Instantiate the model
-num_classes = 27
+num_classes = len(emotions)
 model = EmotionClassifier(bert_model, num_classes)
 
 # Training settings
-optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
+max_lr = 2e-5
+optimizer = torch.optim.Adam(model.parameters(), lr=max_lr)
+scheduler = CosineAnnealingLR(optimizer, T_max=len(train_loader)*3, eta_min=max_lr/10.0)
 criterion = nn.CrossEntropyLoss()
 
 # Training loop
@@ -87,23 +91,32 @@ for epoch in range(3):  # Loop over the dataset multiple times
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
+        scheduler.step()
         total_loss += loss.item()
     print(f"Epoch {epoch+1}, Loss: {total_loss/len(train_loader)}")
+
+# Save the model
+torch.save(model.state_dict(), '../emotion_classifier.pth')
 
 # Simple accuracy check (for demonstration purposes, consider using a more detailed evaluation)
 model.eval()
 correct_predictions = 0
 total_predictions = 0
+time_taken = []
 with torch.no_grad():
     for batch in test_loader:
         input_ids = batch['input_ids']
         attention_mask = batch['attention_mask']
         labels = batch['labels']
+        start_time = time.time()
         outputs = model(input_ids, attention_mask)
+        end_time = time.time()
+        time_taken.append(end_time - start_time)
         _, predicted = torch.max(outputs, 1)
         total_predictions += labels.size(0)
         correct_predictions += (predicted == labels).sum().item()
 
 accuracy = correct_predictions / total_predictions
 print(f"Accuracy: {accuracy}")
+print(f"Average time taken: {sum(time_taken)/len(time_taken)}")
 
