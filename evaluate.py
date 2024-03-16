@@ -46,13 +46,6 @@ def generate_and_decode(prompt):
     return predicted_label
 
 dataset = dataset.map(template_dataset)
-print("Performing model inference...")
-dataset = dataset.map(lambda x: {"predicted_emotion": generate_and_decode(x['text']),"true_emotion":x['emotion']})
-print("Model inference done.")
-train_test_split = dataset.train_test_split(test_size=0.05,seed=42)
-train_set = train_test_split["train"]
-test_set = train_test_split["test"]
-
 
 client = OpenAI()
 
@@ -73,6 +66,14 @@ emotion_map = dict()
 for emotion in emotions:
     emotion_map[emotion] = get_embeddings(emotion) #caching values
 print("Embeddings generated")
+
+
+print("Performing model inference...")
+dataset = dataset.map(lambda x: {"predicted_emotion": generate_and_decode(x['text']),"true_emotion":x['emotion']})
+print("Model inference done.")
+train_test_split = dataset.train_test_split(test_size=0.05,seed=42)
+train_set = train_test_split["train"]
+test_set = train_test_split["test"]
 
 def cosine_angle(vector1, vector2):
     dot_product = np.dot(vector1, vector2)

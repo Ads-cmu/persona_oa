@@ -1,122 +1,154 @@
-import torch
-from torch import nn
-from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import CosineAnnealingLR
-from transformers import RobertaTokenizer, RobertaModel
 import datasets
-from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import time 
+from openai import OpenAI
+import torch 
 
-def fetch_embedding(text):
-  encoded_input = tokenizer(text, return_tensors='pt')
-  # Generate embeddings
-  with torch.no_grad():
-      outputs = model(**encoded_input)
-  embeddings = outputs.last_hidden_state
-  mean_embedding = embeddings.mean(dim=1)
-  return mean_embedding
-
+from transformers import AutoTokenizer
+from transformers import DataCollatorWithPadding
+from transformers import AutoModelForSequenceClassification
+import numpy as np
+from datasets import load_metric
+from transformers import TrainingArguments, Trainer
+ 
+def compute_metrics(eval_pred):
+   load_accuracy = load_metric("accuracy")
+  
+   logits, labels = eval_pred
+   predictions = np.argmax(logits, axis=-1)
+   accuracy = load_accuracy.compute(predictions=predictions, references=labels)["accuracy"]
+   return {"accuracy": accuracy}
 
 # Load the dataset
 dataset = datasets.load_dataset("scott-persona/emotion_test_set", split="train")
-# Encode labels
 text_column = "situation"
 label_column = "emotion"
+
+label2id = {label: i for i, label in enumerate(set(dataset[label_column]))}
+id2label = {i: label for label, i in label2id.items()}
+dataset = dataset.map(lambda example: {'labels': label2id[example[label_column]]})
+
 emotions = set()
 for _, example in enumerate(dataset):
   emotions.add(example[label_column])
 
-label_encoder = LabelEncoder()
-dataset = dataset.map(lambda examples: {"labels": label_encoder.fit_transform(examples[label_column])}, batched=True) 
-  
 train_test_split = dataset.train_test_split(test_size=0.05, seed=42)
 train_set = train_test_split["train"]
 test_set = train_test_split["test"]
 
 # Initialize BERT tokenizer and model
-tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-bert_model = RobertaModel.from_pretrained('roberta-base')
+tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
 
-# Tokenize the text
-def tokenize(batch):
-    return tokenizer(batch[text_column], padding=True, truncation=True, max_length=512, return_tensors="pt")
+def preprocess_function(examples):
+   return tokenizer(examples[text_column], truncation=True, padding=True, max_length=512)
+ 
+tokenized_train = train_set.map(preprocess_function, batched=True)
+tokenized_test = test_set.map(preprocess_function, batched=True)
 
-train_set = train_set.map(tokenize, batched=True, batch_size=len(train_set))
-test_set = test_set.map(tokenize, batched=True, batch_size=len(test_set))
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-# Convert to PyTorch tensors and create dataloaders
-train_set.set_format(type='torch', columns=['input_ids', 'attention_mask', 'labels'])
-test_set.set_format(type='torch', columns=['input_ids', 'attention_mask', 'labels'])
+model = AutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased", num_labels=27)
+model.config.id2label = id2label
+model.config.label2id = label2id
 
-train_loader = DataLoader(train_set, batch_size=16, shuffle=True)
-test_loader = DataLoader(test_set, batch_size=16)
+repo_name = "Advaith28/persona_alternate"
+ 
+training_args = TrainingArguments(
+   output_dir=repo_name,
+   learning_rate=2e-5,
+   per_device_train_batch_size=16,
+   per_device_eval_batch_size=16,
+   num_train_epochs=50,
+   weight_decay=0.01,
+   save_strategy="no",
+   push_to_hub=False,
+)
+ 
+trainer = Trainer(
+   model=model,
+   args=training_args,
+   train_dataset=tokenized_train,
+   eval_dataset=tokenized_test,
+   tokenizer=tokenizer,
+   data_collator=data_collator,
+   compute_metrics=compute_metrics,
+)
 
-# Define the classifier model
-class EmotionClassifier(nn.Module):
-    def __init__(self, bert_model, num_classes):
-        super(EmotionClassifier, self).__init__()
-        self.bert = bert_model
-        self.dropout = nn.Dropout(0.1)
-        self.classifier = nn.Linear(768, num_classes)
-    
-    def forward(self, input_ids, attention_mask):
-        with torch.no_grad():
-            outputs = self.bert(input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.pooler_output
-        pooled_output = self.dropout(pooled_output)
-        return self.classifier(pooled_output)
+trainer.train()
 
-# Instantiate the model
-num_classes = len(emotions)
-model = EmotionClassifier(bert_model, num_classes)
+print(trainer.evaluate())
 
-# Training settings
-max_lr = 2e-5
-optimizer = torch.optim.Adam(model.parameters(), lr=max_lr)
-scheduler = CosineAnnealingLR(optimizer, T_max=len(train_loader)*3, eta_min=max_lr/10.0)
-criterion = nn.CrossEntropyLoss()
+def predict_emotion(text):
+    # Preprocess the text
+    inputs = tokenizer(text,truncation=True, padding=True, max_length=512)
+    breakpoint()
+    # Make predictions
+    outputs = trainer.predict(inputs)
+    print(f"Outputs shape: {outputs.predictions.shape}")
 
-# Training loop
-model.train()
-for epoch in range(3):  # Loop over the dataset multiple times
-    total_loss = 0.0
-    for batch in tqdm(train_loader):
-        optimizer.zero_grad()
-        input_ids = batch['input_ids']
-        attention_mask = batch['attention_mask']
-        labels = batch['labels']
-        outputs = model(input_ids, attention_mask)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
-        total_loss += loss.item()
-    print(f"Epoch {epoch+1}, Loss: {total_loss/len(train_loader)}")
+    # Convert logits to probabilities
+    probabilities = torch.softmax(outputs.predictions, dim=-1)
+    print(f"Probabilities shape: {probabilities.shape}")
 
-# Save the model
-torch.save(model.state_dict(), '../emotion_classifier.pth')
+    # Get the predicted label
+    predicted_label_id = torch.argmax(probabilities, dim=-1).item()
+    print(f"Predicted label ID: {predicted_label_id}")
 
-# Simple accuracy check (for demonstration purposes, consider using a more detailed evaluation)
-model.eval()
-correct_predictions = 0
-total_predictions = 0
-time_taken = []
-with torch.no_grad():
-    for batch in test_loader:
-        input_ids = batch['input_ids']
-        attention_mask = batch['attention_mask']
-        labels = batch['labels']
-        start_time = time.time()
-        outputs = model(input_ids, attention_mask)
-        end_time = time.time()
-        time_taken.append(end_time - start_time)
-        _, predicted = torch.max(outputs, 1)
-        total_predictions += labels.size(0)
-        correct_predictions += (predicted == labels).sum().item()
+    predicted_label = id2label[predicted_label_id]
+    print(f"Predicted label: {predicted_label}")
 
-accuracy = correct_predictions / total_predictions
-print(f"Accuracy: {accuracy}")
-print(f"Average time taken: {sum(time_taken)/len(time_taken)}")
+    return predicted_label
 
+
+client = OpenAI()
+
+def get_embeddings(text):
+    response = client.embeddings.create(
+    input=text,
+    model="text-embedding-ada-002"
+    )
+    embedding = response.data[0].embedding
+    return embedding
+
+print("Generating embeddings...")
+emotion_map = dict()
+for emotion in emotions:
+    emotion_map[emotion] = get_embeddings(emotion) #caching values
+print("Embeddings generated")
+
+
+print("Performing model inference...")
+train_predictions,label_ids,_ = trainer.predict(tokenized_train)
+print("Model inference done.")
+
+def cosine_angle(vector1, vector2):
+    dot_product = np.dot(vector1, vector2)
+    magnitude1 = np.linalg.norm(vector1)
+    magnitude2 = np.linalg.norm(vector2)
+    cosine_similarity = dot_product / (magnitude1 * magnitude2)
+    return cosine_similarity
+
+print("Calculating accuracy...")
+# Calculate the accuracy
+total = 0
+for i,row in enumerate(train_predictions):
+    pred_emotion = id2label[np.argmax(row)]
+    actual_emotion = id2label[label_ids[i]]
+    similarity = cosine_angle(emotion_map[actual_emotion],emotion_map[pred_emotion])
+    total+=similarity
+
+accuracy = total / len(train_set)
+print(f"Training accuracy: {accuracy * 100:.2f}%")
+
+test_predictions,label_ids,_ = trainer.predict(tokenized_test)
+# Calculate the accuracy
+total = 0
+for i,row in enumerate(test_predictions):
+    pred_emotion = id2label[np.argmax(row)]
+    actual_emotion = id2label[label_ids[i]]
+    similarity = cosine_angle(emotion_map[actual_emotion],emotion_map[pred_emotion])
+    total+=similarity
+
+accuracy = total / len(test_set)
+print(f"Test accuracy: {accuracy * 100:.2f}%")
